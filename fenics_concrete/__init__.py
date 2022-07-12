@@ -1,5 +1,4 @@
 import fenics_concrete.sensors
-import fenics_concrete.mori_tanaka_homogenization
 from fenics_concrete.experimental_setups.concrete_column import ConcreteColumnExperiment
 from fenics_concrete.experimental_setups.concrete_cube import ConcreteCubeExperiment
 from fenics_concrete.experimental_setups.concrete_beam import ConcreteBeamExperiment
@@ -10,4 +9,5 @@ from fenics_concrete.material_problems.linear_elasticity import LinearElasticity
 from fenics_concrete.helpers import Parameters
 from fenics_concrete.material_problems.concrete_thix_mechanical import ConcreteThixMechanical
 from fenics_concrete.experimental_setups.concrete_cube_uniaxial import ConcreteCubeUniaxialExperiment
+from fenics_concrete.mori_tanaka_homogenization import ConcreteHomogenization
 
