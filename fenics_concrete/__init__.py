@@ -1,4 +1,5 @@
 import fenics_concrete.sensors
+import fenics_concrete.mori_tanaka_homogenization
 from fenics_concrete.experimental_setups.concrete_column import ConcreteColumnExperiment
 from fenics_concrete.experimental_setups.concrete_cube import ConcreteCubeExperiment
 from fenics_concrete.experimental_setups.concrete_beam import ConcreteBeamExperiment

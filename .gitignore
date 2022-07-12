@@ -1,5 +1,6 @@
 *.h5
 *.xdmf
 .idea
+*.egg-info
 __pycache__
 !ref_*.xdmf
