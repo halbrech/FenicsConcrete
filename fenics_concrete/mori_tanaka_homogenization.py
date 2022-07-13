@@ -15,7 +15,7 @@ def get_k_g_from_e_nu(E, nu):
 
 class ConcreteHomogenization():
     # object to compute homogenized parameters for cement matrix and aggregates
-    def __init__(self, E_matrix, nu_matrix, fc_matrix):
+    def __init__(self, E_matrix, nu_matrix, fc_matrix, kappa_matrix = 1):
         """ initializes the object
 
         matrix parameters are set
@@ -26,10 +26,15 @@ class ConcreteHomogenization():
            Young's modulus of matrix material
         nu_matrix : float
             Poisson's Ratio of matrix material
+        fc_matrix : float
+            Conpressive strength of the matrix
+        kappa_matrix : float, optional
+            Thermal conductivity of the matrix
         """
         self.E_matrix = E_matrix
         self.nu_matrix = nu_matrix
         self.fc_matrix = fc_matrix
+        self.kappa_matrix = kappa_matrix
         self.vol_frac_matrix = 1
 
         self.K_matrix, self.G_matrix = get_k_g_from_e_nu(E_matrix,nu_matrix)
@@ -40,6 +45,7 @@ class ConcreteHomogenization():
         self.E_eff = E_matrix
         self.nu_eff = nu_matrix
         self.fc_eff = fc_matrix
+        self.kappa_eff = kappa_matrix
 
         # list for inclusion values (all phases that are not matrix
         self.n_incl = 0
@@ -48,6 +54,8 @@ class ConcreteHomogenization():
         self.A_dill_dev_incl = []
         self.G_incl = []
         self.K_incl = []
+        self.A_therm_incl = []  # thermal conductivity
+        self.kappa_incl = []
 
 
         # auxiliary factors following Eshelby solution [Eshely, 1957]
@@ -55,7 +63,7 @@ class ConcreteHomogenization():
         self.alpha_0 = (1 + nu_matrix) / (3 * (1 + nu_matrix))
         self.beta_0 = 2 * (4 - 5 * nu_matrix) / (15 * (1 - nu_matrix))
 
-    def add_uncoated_particle(self, E, nu, volume_fraction):
+    def add_uncoated_particle(self, E, nu, volume_fraction, kappa = 1):
         """Adds a phase of uncoated material
 
         the particles are assumed to be homogeneous and spherical
@@ -70,11 +78,16 @@ class ConcreteHomogenization():
             Poisson's Ratio of particle material
         volume_fraction : float
             Volume fraction of the particle within the composite
+        k : float, optional
+            Thermal conductivity
         """
         K, G = get_k_g_from_e_nu(E, nu)
 
         A_dil_vol = self.K_matrix / (self.K_matrix + self.alpha_0 * (K - self.K_matrix))
         A_dil_dev = self.G_matrix / (self.G_matrix + self.beta_0 * (G - self.G_matrix))
+
+        # thermal concentration factor
+        A_therm = 3 * self.kappa_matrix / (2 * self.kappa_matrix + kappa)
 
         # update global fields
         self.n_incl = self.n_incl + 1
@@ -84,6 +97,8 @@ class ConcreteHomogenization():
         self.G_incl.append(G)
         self.K_incl.append(K)
         self.vol_frac_matrix = self.vol_frac_matrix - volume_fraction
+        self.A_therm_incl.append(A_therm)
+        self.kappa_incl.append(kappa)
 
         if self.vol_frac_matrix < 0:
             raise Exception('Volume fraction of matrix can not be smaller than zero!')
@@ -91,7 +106,7 @@ class ConcreteHomogenization():
         self.update_effective_fields()
 
 
-    def add_coated_particle(self, E_inclusion, nu_inclusion, itz_ratio, radius, coat_thickness,volume_fraction):
+    def add_coated_particle(self, E_inclusion, nu_inclusion, itz_ratio, radius, coat_thickness,volume_fraction, kappa=1):
         """Adds a phase of coated material
 
         the particles are assumed to be homogeneous and spherical, coated by degraded matrix material
@@ -115,6 +130,8 @@ class ConcreteHomogenization():
             Thickness of the coating
         volume_fraction : float
             Volume fraction of the particle within the composite
+        k : float, optional
+            Thermal conductivity of the particle, the coat is ignored
         """
         # set values - inclusion, coating, matrix
         E = np.array([E_inclusion, self.E_matrix*itz_ratio, self.E_matrix])
@@ -209,6 +226,10 @@ class ConcreteHomogenization():
         A_dil_dev_incl = A[0] - 21 / 5 * R[0] ** 2 / (1 - 2 * nu[0]) * B[0]
         A_dil_dev_coat = A[1] - 21 / 5 * (R[1] ** 5 - R[0] ** 5) / ((1 - 2 * nu[1]) * (R[1] ** 3 - R[0] ** 3)) * B[1]
 
+        # thermal concentration factor
+        # coating is set to matrix material
+        A_therm = 3 * self.kappa_matrix / (2 * self.kappa_matrix + kappa)
+
         # update global fields
         # inclusion data
         self.vol_frac_incl.append(volume_fraction)
@@ -216,12 +237,16 @@ class ConcreteHomogenization():
         self.A_dill_dev_incl.append(A_dil_dev_incl)
         self.G_incl.append(G[0])
         self.K_incl.append(K[0])
+        self.A_therm_incl.append(A_therm)
+        self.kappa_incl.append(kappa)
         # coating data
         self.vol_frac_incl.append(itz_vol_frac)
         self.A_dill_vol_incl.append(A_dil_vol_coat)
         self.A_dill_dev_incl.append(A_dil_dev_coat)
         self.G_incl.append(G[1])
         self.K_incl.append(K[1])
+        self.A_therm_incl.append(1)  # coating is set to matrix material
+        self.kappa_incl.append(self.kappa_matrix)
         # overall infos
         self.n_incl = self.n_incl + 2
 
@@ -238,6 +263,8 @@ class ConcreteHomogenization():
         K_eff_denominator = self.vol_frac_matrix
         G_eff_numerator = self.vol_frac_matrix * self.G_matrix
         G_eff_denominator = self.vol_frac_matrix
+        kappa_eff_numerator = self.vol_frac_matrix * self.kappa_matrix
+        kappa_eff_denominator = self.vol_frac_matrix
 
         for i in range(self.n_incl):
 
@@ -245,12 +272,16 @@ class ConcreteHomogenization():
             K_eff_denominator += self.vol_frac_incl[i] * self.A_dill_vol_incl[i]
             G_eff_numerator += self.vol_frac_incl[i] * self.G_incl[i] * self.A_dill_dev_incl[i]
             G_eff_denominator += self.vol_frac_incl[i] * self.A_dill_dev_incl[i]
+            kappa_eff_numerator += self.vol_frac_incl[i] * self.kappa_incl[i] * self.A_therm_incl[i]
+            kappa_eff_denominator += self.vol_frac_incl[i] * self.A_therm_incl[i]
 
         # compute effective properties
         self.K_eff = K_eff_numerator / K_eff_denominator
         self.G_eff = G_eff_numerator / G_eff_denominator
         self.E_eff = 9 * self.K_eff * self.G_eff / (3 * self.K_eff + self.G_eff)
         self.nu_eff = (3 * self.K_eff - 2 * self.G_eff) / (2 * (3 * self.K_eff + self.G_eff))
+
+        self.kappa_eff = kappa_eff_numerator / kappa_eff_denominator
 
         # Mori-Tanaka factors for strength estimate
         A_MT_K = 1 / K_eff_denominator
