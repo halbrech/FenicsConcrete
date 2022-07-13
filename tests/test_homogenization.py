@@ -82,3 +82,54 @@ def test_stiffness_homogenization():
         assert homgenized_concrete.E_eff == pytest.approx(13.156471830404511)
         assert homgenized_concrete.nu_eff == pytest.approx(0.21110139111362222)
         assert homgenized_concrete.fc_eff == pytest.approx(11.317889983420725)
+
+
+def test_volume_averages():
+    #input values
+    # matrix
+    E = 42 # MPa
+    poissions_ratio = 0.3
+    compressive_strength = 10
+    matrix_C = 10
+    matrix_rho = 30
+
+    aggregate_vol_frac = 0.5 # volume fraction
+    aggregate_radius = 10
+    aggregate_C = 30
+    aggregate_rho = 10
+
+    # itz assumptions
+    itz_thickness = 0.2 #mm
+    itz_factor = 0.8 # percentage of stiffness of matrix
+
+    homgenized_concrete_1 = fenics_concrete.ConcreteHomogenization(E_matrix=E,
+                                                                   nu_matrix=poissions_ratio,
+                                                                   fc_matrix=compressive_strength,
+                                                                   rho_matrix = matrix_rho,
+                                                                   C_matrix = matrix_C)
+
+    homgenized_concrete_2 = fenics_concrete.ConcreteHomogenization(E_matrix=E,
+                                                                   nu_matrix=poissions_ratio,
+                                                                   fc_matrix=compressive_strength,
+                                                                   rho_matrix = matrix_rho,
+                                                                   C_matrix = matrix_C)
+    # adding uncoated
+    homgenized_concrete_1.add_uncoated_particle(E=E,
+                                                nu=poissions_ratio,
+                                                volume_fraction=aggregate_vol_frac,
+                                                rho = aggregate_rho,
+                                                C =aggregate_C)
+    # adding coated
+    homgenized_concrete_2.add_coated_particle(E_inclusion=E,
+                                              nu_inclusion=poissions_ratio,
+                                              itz_ratio=itz_factor,
+                                              radius=aggregate_radius,
+                                              coat_thickness=itz_thickness,
+                                              volume_fraction=aggregate_vol_frac,
+                                              rho = aggregate_rho,
+                                              C =aggregate_C)
+
+    assert homgenized_concrete_1.C_eff == pytest.approx(homgenized_concrete_2.C_eff)
+    assert homgenized_concrete_1.rho_eff == pytest.approx(homgenized_concrete_2.rho_eff)
+    assert homgenized_concrete_1.rho_eff == pytest.approx(20)
+    assert homgenized_concrete_1.C_eff == pytest.approx(20)

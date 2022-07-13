@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 
 def get_e_nu_from_k_g(K, G):
@@ -15,7 +16,7 @@ def get_k_g_from_e_nu(E, nu):
 
 class ConcreteHomogenization():
     # object to compute homogenized parameters for cement matrix and aggregates
-    def __init__(self, E_matrix, nu_matrix, fc_matrix, kappa_matrix = 1):
+    def __init__(self, E_matrix, nu_matrix, fc_matrix, rho_matrix = 1, kappa_matrix = 1, C_matrix = 1):
         """ initializes the object
 
         matrix parameters are set
@@ -28,14 +29,21 @@ class ConcreteHomogenization():
             Poisson's Ratio of matrix material
         fc_matrix : float
             Conpressive strength of the matrix
+        rho_matrix : float, optional
+            Density of the matrix
         kappa_matrix : float, optional
             Thermal conductivity of the matrix
+        C_matrix : float, optional
+            Specific/volumetric heat capacity of the matrix
         """
         self.E_matrix = E_matrix
         self.nu_matrix = nu_matrix
         self.fc_matrix = fc_matrix
         self.kappa_matrix = kappa_matrix
+        self.C_matrix = C_matrix
+        self.rho_matrix = rho_matrix
         self.vol_frac_matrix = 1
+        self.vol_frac_binder = 1  # when coated inclusions are considered these still count as binder volume
 
         self.K_matrix, self.G_matrix = get_k_g_from_e_nu(E_matrix,nu_matrix)
 
@@ -46,16 +54,21 @@ class ConcreteHomogenization():
         self.nu_eff = nu_matrix
         self.fc_eff = fc_matrix
         self.kappa_eff = kappa_matrix
+        self.C_eff = C_matrix
+        self.rho_eff = rho_matrix
 
         # list for inclusion values (all phases that are not matrix
         self.n_incl = 0
         self.vol_frac_incl = []
+
         self.A_dill_vol_incl = []
         self.A_dill_dev_incl = []
         self.G_incl = []
         self.K_incl = []
         self.A_therm_incl = []  # thermal conductivity
         self.kappa_incl = []
+        self.C_incl = []
+        self.rho_incl = []
 
 
         # auxiliary factors following Eshelby solution [Eshely, 1957]
@@ -63,7 +76,7 @@ class ConcreteHomogenization():
         self.alpha_0 = (1 + nu_matrix) / (3 * (1 + nu_matrix))
         self.beta_0 = 2 * (4 - 5 * nu_matrix) / (15 * (1 - nu_matrix))
 
-    def add_uncoated_particle(self, E, nu, volume_fraction, kappa = 1):
+    def add_uncoated_particle(self, E, nu, volume_fraction, rho = 1, kappa = 1, C = 1):
         """Adds a phase of uncoated material
 
         the particles are assumed to be homogeneous and spherical
@@ -78,8 +91,13 @@ class ConcreteHomogenization():
             Poisson's Ratio of particle material
         volume_fraction : float
             Volume fraction of the particle within the composite
-        k : float, optional
+        rho : float, optional
+            Density
+        kappa : float, optional
             Thermal conductivity
+        C : float, optional
+            Specific/volumetric heat capacity
+
         """
         K, G = get_k_g_from_e_nu(E, nu)
 
@@ -97,8 +115,11 @@ class ConcreteHomogenization():
         self.G_incl.append(G)
         self.K_incl.append(K)
         self.vol_frac_matrix = self.vol_frac_matrix - volume_fraction
+        self.vol_frac_binder = self.vol_frac_binder - volume_fraction
         self.A_therm_incl.append(A_therm)
         self.kappa_incl.append(kappa)
+        self.rho_incl.append(rho)
+        self.C_incl.append(C)
 
         if self.vol_frac_matrix < 0:
             raise Exception('Volume fraction of matrix can not be smaller than zero!')
@@ -106,7 +127,8 @@ class ConcreteHomogenization():
         self.update_effective_fields()
 
 
-    def add_coated_particle(self, E_inclusion, nu_inclusion, itz_ratio, radius, coat_thickness,volume_fraction, kappa=1):
+    def add_coated_particle(self, E_inclusion, nu_inclusion, itz_ratio, radius, coat_thickness,volume_fraction,
+                            rho = 1, kappa = 1, C = 1):
         """Adds a phase of coated material
 
         the particles are assumed to be homogeneous and spherical, coated by degraded matrix material
@@ -130,8 +152,12 @@ class ConcreteHomogenization():
             Thickness of the coating
         volume_fraction : float
             Volume fraction of the particle within the composite
+        rho : float, optional
+            Density of the inclusion
         k : float, optional
             Thermal conductivity of the particle, the coat is ignored
+        C : float, optional
+            Specific/volumetric heat capacity of the inclusion
         """
         # set values - inclusion, coating, matrix
         E = np.array([E_inclusion, self.E_matrix*itz_ratio, self.E_matrix])
@@ -239,6 +265,8 @@ class ConcreteHomogenization():
         self.K_incl.append(K[0])
         self.A_therm_incl.append(A_therm)
         self.kappa_incl.append(kappa)
+        self.rho_incl.append(rho)
+        self.C_incl.append(C)
         # coating data
         self.vol_frac_incl.append(itz_vol_frac)
         self.A_dill_vol_incl.append(A_dil_vol_coat)
@@ -247,10 +275,13 @@ class ConcreteHomogenization():
         self.K_incl.append(K[1])
         self.A_therm_incl.append(1)  # coating is set to matrix material
         self.kappa_incl.append(self.kappa_matrix)
+        self.rho_incl.append(self.rho_matrix)
+        self.C_incl.append(self.C_matrix)
         # overall infos
         self.n_incl = self.n_incl + 2
 
         self.vol_frac_matrix = self.vol_frac_matrix - volume_fraction - itz_vol_frac
+        self.vol_frac_binder = self.vol_frac_binder - volume_fraction
 
         if self.vol_frac_matrix < 0:
             raise Exception('Volume fraction of matrix can not be smaller than zero!')
@@ -265,6 +296,9 @@ class ConcreteHomogenization():
         G_eff_denominator = self.vol_frac_matrix
         kappa_eff_numerator = self.vol_frac_matrix * self.kappa_matrix
         kappa_eff_denominator = self.vol_frac_matrix
+        self.rho_eff = self.vol_frac_matrix * self.rho_matrix
+        self.C_eff = self.vol_frac_matrix * self.C_matrix
+        vol_test = self.vol_frac_matrix
 
         for i in range(self.n_incl):
 
@@ -274,8 +308,13 @@ class ConcreteHomogenization():
             G_eff_denominator += self.vol_frac_incl[i] * self.A_dill_dev_incl[i]
             kappa_eff_numerator += self.vol_frac_incl[i] * self.kappa_incl[i] * self.A_therm_incl[i]
             kappa_eff_denominator += self.vol_frac_incl[i] * self.A_therm_incl[i]
+            self.rho_eff += self.vol_frac_incl[i] * self.rho_incl[i]
+            self.C_eff += self.vol_frac_incl[i] * self.C_incl[i]
+            vol_test += self.vol_frac_incl[i]
 
-        # compute effective properties
+        assert vol_test == pytest.approx(1)  # sanity check that vol fraction have been corretly computed
+
+            # compute effective properties
         self.K_eff = K_eff_numerator / K_eff_denominator
         self.G_eff = G_eff_numerator / G_eff_denominator
         self.E_eff = 9 * self.K_eff * self.G_eff / (3 * self.K_eff + self.G_eff)

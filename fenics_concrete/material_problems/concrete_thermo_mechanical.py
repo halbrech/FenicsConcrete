@@ -8,6 +8,7 @@ from fenics_concrete.material_problems.material_problem import MaterialProblem
 from fenics_concrete.helpers import Parameters
 from fenics_concrete.helpers import set_q
 from fenics_concrete.helpers import LocalProjector
+from fenics_concrete.mori_tanaka_homogenization import ConcreteHomogenization
 from fenics_concrete import experimental_setups
 import fenics_concrete
 
@@ -57,7 +58,7 @@ class ConcreteThermoMechanical(MaterialProblem):
         default_p['degree'] = 2  # default boundary setting
 
         ### paramters for mechanics problem
-        default_p['E_28'] = 15000000  # Youngs Modulus N/m2 or something... TODO: check units!
+        default_p['E_28'] = 3000  # Youngs Modulus N/m2 or something... TODO: check units!
         default_p['nu'] = 0.2  # Poissons Ratio
 
         # required paramters for alpha to E mapping
@@ -70,8 +71,80 @@ class ConcreteThermoMechanical(MaterialProblem):
         default_p['a_fc'] = 1.2
         default_p['ft_inf'] = 467000
         default_p['a_ft'] = 1.0
-
+        #
         self.p = default_p + self.p
+
+        # for the sake of backward input compatibility this structure is generated after the default input
+        # # dummy values, this is chosen to be backward compatible to my first test, before the homogenization was implemented
+        # the 'binder properties' can still be set as input and will override the default
+        # TODO this is not a good long term solution... just checking that everything is fine now
+        if 'inclusion_properties' not in self.p.keys():
+            self.p['inclusion_properties'] = [{'E': self.p['E_28'],
+                                               'nu': self.p['nu'],
+                                               'vol_frac' : 1 - self.p['b_ratio'],
+                                               'density': (self.p['density'] - self.p['density_binder']*self.p['b_ratio'])/(1 - self.p['b_ratio']),
+                                               'thermal_cond': self.p['themal_cond'],
+                                               'vol_heat_cap': self.p['vol_heat_cap']}]
+
+        if 'binder_properties' not in self.p.keys():
+            self.p['binder_properties'] = {'E_28' : self.p['E_28'],
+                                           'nu' : self.p['nu'],
+                                           'f_c' : self.p['fc_inf'],
+                                           'density' : self.p['density_binder'],
+                                           'thermal_cond' : self.p['themal_cond'],
+                                           'vol_heat_cap': self.p['vol_heat_cap']}
+
+        # setup homogenization method with details for binders
+        concrete = ConcreteHomogenization(E_matrix = self.p['binder_properties']['E_28'],
+                                                nu_matrix = self.p['binder_properties']['nu'],
+                                                fc_matrix = self.p['binder_properties']['f_c'],
+                                                rho_matrix = self.p['binder_properties']['density'],
+                                                kappa_matrix = self.p['binder_properties']['thermal_cond'],
+                                                C_matrix = self.p['binder_properties']['vol_heat_cap'])
+
+        # input for uncoated inclusions expected in p['inclusion_properties']
+        #   required input is a list of dictionaries
+        #   required dictonary fields: 'E','nu','vol_frac'
+        #   optional dictonary fields: 'density', 'thermal_cond', 'vol_heat_cap'
+        if 'inclusion_properties' in self.p.keys():
+            for inclusion in self.p['inclusion_properties']:
+                concrete.add_uncoated_particle(E = inclusion['E'],
+                                                    nu = inclusion['nu'],
+                                                    volume_fraction = inclusion['vol_frac'],
+                                                    rho = inclusion['density'],
+                                                    kappa = inclusion['thermal_cond'],
+                                                    C = inclusion['vol_heat_cap'])
+
+        # input for coated inclusions expected in p['coated_inclusion_properties']
+        #   required input is a list of dictionaries
+        #   required dictonary fields: 'E','nu','vol_frac'
+        #   optional dictonary fields: 'density', 'thermal_cond', 'vol_heat_cap'
+        if 'coated_inclusion_properties' in self.p.keys():
+            for inclusion in self.p['coated_inclusion_properties']:
+                concrete.add_coated_particle(E_inclusion = inclusion['E'],
+                                                  nu_inclusion = inclusion['nu'],
+                                                  itz_ratio = inclusion['itz_ratio'],
+                                                  radius = inclusion['radius'],
+                                                  coat_thickness= inclusion['thickness'],
+                                                  volume_fraction = inclusion['vol_frac'],
+                                                  rho = inclusion['density'],
+                                                  kappa = inclusion['thermal_cond'],
+                                                  C = inclusion['vol_heat_cap'])
+
+        # passing concrete object to non linear problems
+        self.p['concrete'] = concrete
+
+
+        # setting up the hommogenization with the required input stuff...
+        #
+        #checking for proper input
+
+
+
+
+
+
+
 
         # setting up the two nonlinear problems
         self.temperature_problem = ConcreteTempHydrationModel(self.experiment.mesh, self.p, pv_name=self.pv_name)
@@ -211,20 +284,20 @@ class ConcreteTempHydrationModel(df.NonlinearProblem):
             vT = df.TestFunction(self.V)
 
             # normal form
-            R_ufl = df.Constant(self.p.vol_heat_cap) * (self.T) * vT * dxm
-            R_ufl += self.dt_form * df.dot(df.Constant(self.p.themal_cond) * df.grad(self.T), df.grad(vT)) * dxm
-            R_ufl += -  df.Constant(self.p.vol_heat_cap) * self.T_n * vT * dxm
+            R_ufl = df.Constant(self.p.concrete.C_eff) * (self.T) * vT * dxm
+            R_ufl += self.dt_form * df.dot(df.Constant(self.p.concrete.kappa_eff) * df.grad(self.T), df.grad(vT)) * dxm
+            R_ufl += -  df.Constant(self.p.concrete.C_eff) * self.T_n * vT * dxm
             # quadrature point part
 
             self.R = R_ufl - df.Constant(
-                self.p.Q_pot * self.p.density_binder * self.p.b_ratio) * self.q_delta_alpha * vT * dxm
+                self.p.Q_pot * self.p.concrete.rho_matrix * self.p.concrete.vol_frac_binder) * self.q_delta_alpha * vT * dxm
 
             # derivative
             # normal form
             dR_ufl = df.derivative(R_ufl, self.T)
             # quadrature part
             self.dR = dR_ufl - df.Constant(
-                self.p.Q_pot * self.p.density_binder * self.p.b_ratio) * self.q_ddalpha_dT * T_ * vT * dxm
+                self.p.Q_pot * self.p.concrete.rho_matrix * self.p.concrete.vol_frac_binder) * self.q_ddalpha_dT * T_ * vT * dxm
 
             # setup projector to project continuous funtionspace to quadrature
             self.project_T = LocalProjector(self.T, q_V, dxm)
@@ -538,8 +611,8 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
             v = df.TestFunction(self.V)
 
             # Elasticity parameters without multiplication with E
-            x_mu = 1.0 / (2.0 * (1.0 + self.p.nu))
-            x_lambda = 1.0 * self.p.nu / ((1.0 + self.p.nu) * (1.0 - 2.0 * self.p.nu))
+            x_mu = 1.0 / (2.0 * (1.0 + self.p.concrete.nu_eff))
+            x_lambda = 1.0 * self.p.concrete.nu_eff / ((1.0 + self.p.concrete.nu_eff) * (1.0 - 2.0 * self.p.concrete.nu_eff))
 
             # Stress computation for linear elastic problem without multiplication with E
             def x_sigma(v):
@@ -547,11 +620,11 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
 
             # Volume force            
             if self.p.dim == 1:
-                f = df.Constant(-self.p.g * self.p.density)
+                f = df.Constant(-self.p.g * self.p.concrete.rho_eff)
             elif self.p.dim == 2:
-                f = df.Constant((0, -self.p.g * self.p.density))
+                f = df.Constant((0, -self.p.g * self.p.concrete.rho_eff))
             elif self.p.dim == 3:
-                f = df.Constant((0, 0, -self.p.g * self.p.density))
+                f = df.Constant((0, 0, -self.p.g * self.p.concrete.rho_eff))
 
             self.sigma_ufl = self.q_E * x_sigma(self.u)
 
@@ -708,7 +781,7 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
 
         parameters = {}
         parameters['alpha_t'] = self.p.alpha_t
-        parameters['E_inf'] = self.p.E_28
+        parameters['E_inf'] = self.p.concrete.E_eff
         parameters['alpha_0'] = self.p.alpha_0
         parameters['a_E'] = self.p.a_E
         # vectorize the function for speed up
@@ -716,7 +789,7 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
         E_list = E_fkt_vectorized(alpha_list, parameters)
 
         parameters = {}
-        parameters['X_inf'] = self.p.fc_inf
+        parameters['X_inf'] = self.p.concrete.fc_eff
         parameters['a_X'] = self.p.a_fc
 
         fc_list = self.general_hydration_fkt(alpha_list, parameters)
@@ -775,8 +848,8 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
         self.pv_file.write(u_plot, t, encoding=df.XDMFFile.Encoding.ASCII)
 
         # Elasticity parameters without multiplication with E
-        x_mu = 1.0 / (2.0 * (1.0 + self.p.nu))
-        x_lambda = 1.0 * self.p.nu / ((1.0 + self.p.nu) * (1.0 - 2.0 * self.p.nu))
+        x_mu = 1.0 / (2.0 * (1.0 + self.p.concrete.nu_eff))
+        x_lambda = 1.0 * self.p.concrete.nu_eff / ((1.0 + self.p.concrete.nu_eff) * (1.0 - 2.0 * self.p.concrete.nu_eff))
 
         def x_sigma(v):
             return 2.0 * x_mu * df.sym(df.grad(v)) + x_lambda * df.tr(df.sym(df.grad(v))) * df.Identity(len(v))
