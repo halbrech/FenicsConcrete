@@ -14,16 +14,20 @@ def test_reinforced_beam_2D():
     parameters['degree'] = 1  # reinforcement currently just linear
 
     # geometry
-    parameters['length'] = 5 # m length
+    parameters['length'] = 10 # m length
     parameters['height'] = 1 # height
-    parameters['width'] = 0.8 # width
+    parameters['width'] = 0.5 # width
 
     # reinforcement
-    parameters['reinforcment_y_location'] = 0.2 # distance from bottom in m
-    parameters['A_reinforcement'] = 0.001  # m^2
+    # reinforcement
+    parameters['reinforcment_y_location'] = 0.2  # distance from bottom in m
+    bars_n = 4
+    bars_diameter = 12  # in mm
+    parameters['A_reinforcement'] = (bars_n * np.pi * (bars_diameter / 2) ** 2) / 1000 ** 2  # m^2
     parameters['E_reinforcement'] = 200e9  # in Pa
+    # parameters['E_reinforcement'] = 0e9  # in Pa
 
-    parameters['density'] = 2350  # in kg/m^3 density of concrete
+    parameters['density'] = 23500  # in kg/m^3 density of concrete
     parameters['themal_cond'] = 2.0  # effective thermal conductivity, approx in Wm^-3K^-1, concrete!
     parameters['vol_heat_cap'] = 2.4e6  # volumetric heat cap J/m3
 
@@ -56,7 +60,7 @@ def test_reinforced_beam_2D():
     parameters['E_act'] = 5653 * 8.3145  # activation energy in Jmol^-1
     parameters['T_ref'] = 25  # reference temperature in degree celsius
 
-    displacement = -.1 # in meter
+    displacement = -.01 # in meter
 
 
     experiment = fenics_concrete.ConcreteBeamReinforced2DExperiment(parameters)
@@ -75,6 +79,7 @@ def test_reinforced_beam_2D():
     t = dt  # first time step time
 
     while t <= time:  # time
+        print(f'### SOLVE timestep {t}')
         # solve temp-hydration-mechanics
         problem.solve(t=t)  # solving this
         problem.pv_plot(t=t)

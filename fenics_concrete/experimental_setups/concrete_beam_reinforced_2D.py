@@ -100,7 +100,7 @@ class ConcreteBeamReinforced2DExperiment(Experiment):
 
         displ_bcs.append(df.DirichletBC(V, fixed_bc, left_support, method='pointwise'))
         displ_bcs.append(df.DirichletBC(V.sub(dir_id), df.Constant(0), right_support, method='pointwise'))
-        displ_bcs.append(df.DirichletBC(V.sub(dir_id), self.displ_load, center_top, method='pointwise'))
+        #displ_bcs.append(df.DirichletBC(V.sub(dir_id), self.displ_load, center_top, method='pointwise'))
 
         return displ_bcs
 

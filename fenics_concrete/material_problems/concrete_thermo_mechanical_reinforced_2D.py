@@ -93,7 +93,7 @@ class ConcreteThermoMechanicalReinforced2D(MaterialProblem):
 
         # setting bcs
         # todo define function to apply reinforcement???
-        self.mechanics_problem.apply_reinforcement(self.experiment)
+        self.mechanics_problem.set_reinforcement(self.experiment)
 
         #params = [list_1, L, Nx, H, Ny, A_eff, E_s, V]
 
@@ -127,11 +127,16 @@ class ConcreteThermoMechanicalReinforced2D(MaterialProblem):
 
         # mechanics paroblem is not required for temperature, could crash in frist time steps but then be useful
         try:
-            self.mechanics_solver.solve(self.mechanics_problem, self.mechanics_problem.u.vector())
+            # in cooperation with Sjard
+            self.mechanics_solver.parameters['maximum_iterations'] = 1
+            self.mechanics_solver.parameters['error_on_nonconvergence'] = False
+
+            number_of_iterations, convergence  = self.mechanics_solver.solve(self.mechanics_problem, self.mechanics_problem.u.vector())
         except Exception as e:
-            print('AAAAAAAAAAHHHHHHHHHH!!!!!')
+            print(f'Mechanics crashed at time: {t}')
+            print('This could be due to the low stiffness during the initial time steps.')
             warnings.warn(f'Mechanics crashed at time: {t}, Error message: {e}')
-            
+
 
         # history update
         self.temperature_problem.update_history()
@@ -768,6 +773,7 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
 
     def set_bcs(self, bcs):
         # Only now (with the bcs) can we initialize the assembler
+        #self.bcs = bcs
         self.assembler = df.SystemAssembler(self.dR, self.R, bcs)
 
     def F(self, b, x):
@@ -779,7 +785,11 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
         self.assembler.assemble(b, x)
 
     def J(self, A, x):
+        #df.assemble()
         self.assembler.assemble(A)
+        self.r.to_apply(A)
+
+
 
     def pv_plot(self, t=0):
         # paraview export
@@ -817,9 +827,8 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
         self.pv_file.write(yield_plot, t, encoding=df.XDMFFile.Encoding.ASCII)
         self.pv_file.write(sigma_plot, t, encoding=df.XDMFFile.Encoding.ASCII)
 
-    def apply_reinforcement(self, experiment):
+    def set_reinforcement(self, experiment):
 
-        print(self.p)
         list_1 = experiment.reinforcement_location
         L = self.p.length
         Nx = experiment.n_length
@@ -834,15 +843,12 @@ class ConcreteMechanicsModel(df.NonlinearProblem):
         #
         # #A = df.PETScMatrix()
         # #df.assemble(a, tensor=A)
-        r = Reinforcement(params)
+        self.r = Reinforcement(params)
         # #r.to_apply(A)
 
         # TODO when to apply what, where???
 
 
-
-        print('Moin')
-        exit()
 
 
 # reinforcement class -> here reinforcement is added as defined in list_1 and list_2
